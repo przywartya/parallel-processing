@@ -1,4 +1,6 @@
 import time
+from threading import Thread
+
 
 NUMBER_OF_WARLOCKS = 3
 NUMBER_OF_SORCERERS = 3
@@ -6,6 +8,7 @@ FACTORY_CAPACITY = 2
 PRODUCTION_WAIT = 0.5
 WARLOCK_WAIT = 1
 SORCERER_WAIT = 0.7
+FACTORIES_WORK = True
 
 
 class Alchemist:
@@ -48,19 +51,23 @@ class Resource:
 
 
 class Factory:
-    def __init__(self, resources, curses):
+    def __init__(self, resources, curses, rtype):
         self.resources = resources
         self.curses = curses
+        self.rtype = rtype
+
+    def get_thread(self):
+        return Thread(target=self.run)
 
     def run(self):
-        while True:
-            if self.curses == 0:
-                self.start_production()
+        while FACTORIES_WORK:
+            self.start_production()
 
     def start_production(self):
-        if len(self.resources) < FACTORY_CAPACITY:
+        print("Factory {} has now {} resources".format(self.rtype, len(self.resources)))
+        if len(self.resources) < FACTORY_CAPACITY and self.curses == 0:
             time.sleep(PRODUCTION_WAIT)
-            self.resources += 1
+            self.resources.append(Resource(rtype=self.rtype))
 
 
 if __name__ == "__main__":
@@ -83,6 +90,26 @@ if __name__ == "__main__":
         'resources': [mercury, sulfur, lead],
         'alchemists': []
     }
-    Factory(resources=[lead], curses=0)
-    Factory(resources=[sulfur], curses=0)
-    Factory(resources=[mercury], curses=0)
+    factories = [
+        Factory(resources=[], curses=0, rtype=Resource.TYPES['lead']),
+        Factory(resources=[], curses=0, rtype=Resource.TYPES['sulfur']),
+        Factory(resources=[], curses=0, rtype=Resource.TYPES['mercury'])
+    ]
+    factory_threads = []
+    for factory in factories:
+        t = factory.get_thread()
+        factory_threads.append(t)
+        t.start()
+    time.sleep(1)
+    FACTORIES_WORK = False
+    print(factory_threads)
+    for t in factory_threads:
+        t.join()
+    print(factory_threads)
+
+
+# PROPER SOLUTION:
+# each process should be treated equally
+# it should be independent on the speed of processes
+# the conflicts should be solved in finite time
+# the parts of processes, which are outside the critical section, should be independent
