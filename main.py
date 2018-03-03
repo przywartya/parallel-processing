@@ -47,8 +47,8 @@ class Warlock:
             finally:
                 curse_lock.release()
 
-    @staticmethod
-    def cast_curse(factory):
+    def cast_curse(self, factory):
+        print("Warlock {} casts curse on {} factory".format(id(self), factory.rtype))
         time.sleep(WARLOCK_WAIT)
         factory.curses += 1
 
@@ -72,24 +72,29 @@ class Sorcerer:
             finally:
                 curse_lock.release()
 
-    @staticmethod
-    def remove_curse(factory):
+    def remove_curse(self, factory):
+        print("Sorcerer {} removes curse on {} factory".format(id(self), factory.rtype))
         time.sleep(SORCERER_WAIT)
         factory.curses -= 1
 
 
 class Factory:
-    def __init__(self, resources, curses, rtype):
+    def __init__(self, resources, curses, rtype, c_lock):
         self.resources = resources
         self.curses = curses
         self.rtype = rtype
+        self.c_lock = c_lock
 
     def get_thread(self):
         return Thread(target=self.run)
 
     def run(self):
         while FACTORIES_WORK:
-            self.start_production()
+            self.c_lock.acquire()
+            try:
+                self.start_production()
+            finally:
+                self.c_lock.release()
 
     def start_production(self):
         time.sleep(PRODUCTION_WAIT)
@@ -98,29 +103,6 @@ class Factory:
         if len(self.resources) < FACTORY_CAPACITY and self.curses == 0:
             time.sleep(PRODUCTION_WAIT)
             self.resources.append(Resource(rtype=self.rtype))
-
-
-def spawn_wizards(factories):
-    wizard_locks = {
-        'lead': {
-            'empty': Lock(),
-            'curse': Lock()
-        },
-        'mercury': {
-            'empty': Lock(),
-            'curse': Lock()
-        },
-        'sulfur': {
-            'empty': Lock(),
-            'curse': Lock()
-        },
-    }
-    wizards = []
-    for i in range(0, NUMBER_OF_WARLOCKS):
-        wizards.append(Warlock(factories, wizard_locks))
-    for i in range(0, NUMBER_OF_SORCERERS):
-        wizards.append(Sorcerer(factories, wizard_locks))
-    return wizards
 
 
 def spawn_alchemists():
@@ -145,17 +127,43 @@ def spawn_alchemists():
     }
 
 
-def spawn_factories():
+def spawn_wizards(factories, wizard_locks):
+    wizards = []
+    for i in range(0, NUMBER_OF_WARLOCKS):
+        wizards.append(Warlock(factories, wizard_locks))
+    for i in range(0, NUMBER_OF_SORCERERS):
+        wizards.append(Sorcerer(factories, wizard_locks))
+    return wizards
+
+
+def spawn_factories(wizard_locks):
     return [
-        Factory(resources=[], curses=0, rtype=Resource.TYPES['lead']),
-        Factory(resources=[], curses=0, rtype=Resource.TYPES['sulfur']),
-        Factory(resources=[], curses=0, rtype=Resource.TYPES['mercury'])
+        Factory(resources=[], curses=0, rtype=Resource.TYPES['lead'],
+                c_lock=wizard_locks['lead']['curse']),
+        Factory(resources=[], curses=0, rtype=Resource.TYPES['sulfur'],
+                c_lock=wizard_locks['sulfur']['curse']),
+        Factory(resources=[], curses=0, rtype=Resource.TYPES['mercury'],
+                c_lock=wizard_locks['mercury']['curse'])
     ]
 
 
 def setup_wizard_world():
-    factories = spawn_factories()
-    wizards = spawn_wizards(factories)
+    wizard_locks = {
+        'lead': {
+            'empty': Lock(),
+            'curse': Lock()
+        },
+        'mercury': {
+            'empty': Lock(),
+            'curse': Lock()
+        },
+        'sulfur': {
+            'empty': Lock(),
+            'curse': Lock()
+        },
+    }
+    factories = spawn_factories(wizard_locks)
+    wizards = spawn_wizards(factories, wizard_locks)
     return factories+wizards
 
 
