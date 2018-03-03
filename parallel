@@ -1,0 +1,19 @@
+Easy:
+Factory has to wait for production and storage space
+
+Medium:
+Synchronization between factory and warlock and sorcerer
+In the factory you have to check if its cursed, if its not then you can start production.
+Warlock is adding curses and Sorcerer is removing them.
+
+Upper-Medium:
+Synchronization between alchemists. Here you have to wait for several things at the same time,
+check whether you can be served or not (if yes then you do something), if you cannot be served
+then you wait (and process should be sleeping until both resources are available, you wake
+the process just once). Its not that who comes first then he is served first (in case if 
+waiting is not necessary). 
+You should avoid starvation (especially for the guy who uses all three resources).
+Do not wake a process if it cannot be served!
+
+You should not be blocking processess if they do not have to wait! 
+(dont block everything and serve everything one by one).
