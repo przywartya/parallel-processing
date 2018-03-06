@@ -5,6 +5,7 @@ from threading import Lock
 
 NUMBER_OF_WARLOCKS = 3
 NUMBER_OF_SORCERERS = 3
+NUMBER_OF_ALCHEMISTS = 3
 FACTORY_CAPACITY = 2
 PRODUCTION_WAIT = 0.5
 WARLOCK_WAIT = 1
@@ -51,8 +52,9 @@ class WorkerThread(MyThread):
         m_lock = self.alchemists_locks['mercury']['resource']
         alchemist_a_lock = self.alchemists_locks['alchemist-A']
         print('Acquiring alchemist A lock.')
+        alchemists_iterator = iter(self.alchemists)
         alchemist_a_lock.acquire()
-        self.free_alchemists()
+        alchemist_thread = self.free_alchemist(next(alchemists_iterator))
         while True:
             l_factory = None
             m_factory = None
@@ -65,23 +67,32 @@ class WorkerThread(MyThread):
             l_lock.acquire()
             m_lock.acquire()
             try:
-                if l_factory.resources > 0 and m_factory.resources > 0:
+                if len(l_factory.resources) > 0 and len(m_factory.resources) > 0:
                     print('Now i can get some lead and mercury')
                     alchemist_a_lock.release()
-                    time.sleep(1)
+                    ## Manager will release, and all alchemists will begin
+                    ## reacquiring the lock. I dont want this. I want one
+                    ## release from manager, one acquire from one alchemist.
+                    ## Then alchemists cannot reacquire unless manager acquires
+                    ## and releases it once again.
+                    alchemist_thread.join()
                     alchemist_a_lock.acquire()
                     print('Ok alchemist has finished reading')
+                    ## free another alchemist?
+                    try:
+                        next_alchemist = next(alchemists_iterator)
+                        alchemist_thread = self.free_alchemist(next_alchemist)
+                    except StopIteration:
+                        break ## Or switch the alchemists list, in the future
             finally:
                 l_lock.release()
                 m_lock.release()
                 time.sleep(.5)
 
-    def free_alchemists(self):
-        a_threads = []
-        for i in self.alchemists:
-            th = i.get_thread()
-            a_threads.append(th)
-            th.start()
+    def free_alchemist(self, a):
+        th = a.get_thread()
+        th.start()
+        return th
 
 
 class Alchemist(MyThread):
@@ -93,7 +104,7 @@ class Alchemist(MyThread):
     def run(self):
         print('Alchemist ({}+{}) runs'.format(self.resources[0].rtype, self.resources[1].rtype))
         with self.lock:
-            print('I know that my resources are available!')
+            print('I know that my resources are available! I get one of each :)')
             for f in self.factories:
                 f.resources.pop()
 
@@ -204,6 +215,16 @@ def spawn_alchemists(alchemists_locks, guild_factories):
         'alchemists': []
     }
     return [
+        Alchemist(
+            resources=GUILD_A['resources'],
+            lock=alchemists_locks['alchemist-A'],
+            factories=guild_factories['a-factories']
+        ),
+        Alchemist(
+            resources=GUILD_A['resources'],
+            lock=alchemists_locks['alchemist-A'],
+            factories=guild_factories['a-factories']
+        ),
         Alchemist(
             resources=GUILD_A['resources'],
             lock=alchemists_locks['alchemist-A'],
