@@ -46,6 +46,18 @@ class WorkerThread(MyThread):
     # Jak zdobedzie wszystkie 3 to losuje jedna z czterech gildii
     # I uwalnia lock dla alchemisty z tej wylosowanej gildii
 
+    ## Nieefektywne budzenie jezeli jest duzo takich co nie moga byc
+    ## Tysiac alchemistow A i jeden alchemista B
+
+    ## Losowanie jeden z czterech gildii,
+    ## sprawdzenie dla wylosowanej gildii dostepnosci jej resourcow
+    ##
+
+    ## nie potrzebuje locka na kazdy tym alchemisty
+    ## wystarczy lock na 'alchemist' bo i tak obsluguje go one at a time :)
+
+    ## jak sie nic nie wydarzylo to nie ma powodu zeby sprawdzac
+    ## czyli wyslij z fabryki wiadomosc ze moze juz byc uzyta
     def __init__(self, alchemists_locks, factories, alchemists):
         self.alchemists_locks = alchemists_locks
         self.factories = factories
@@ -163,6 +175,8 @@ class Sorcerer(MyThread):
             try:
                 if random_factory.curses > 0:
                     self.remove_curse(random_factory)
+                    ## jesli to jest ostatnia klatwa na tej fabryce to uwolnij lock dla tej fabryki ktory jej powie ze
+                    ## moze juz pracowac
             finally:
                 random_factory = random.choice(self.factories)
                 curse_lock.release()
@@ -175,6 +189,9 @@ class Sorcerer(MyThread):
 
 
 class Factory(MyThread):
+    ## Semafor z informacja o tym ze jest pusty kontener i klatwy (czekanie na mozliwosc produkcji)
+    ## jednym albo dwoma
+
     def __init__(self, resources, curses, rtype, c_lock, r_lock):
         self.resources = resources
         self.curses = curses
@@ -237,10 +254,28 @@ def spawn_alchemists(alchemists_locks, guild_factories):
             guild='A'
         ),
         Alchemist(
+            resources=GUILD_A['resources'],
+            lock=alchemists_locks['alchemist-A'],
+            factories=guild_factories['a-factories'],
+            guild='A'
+        ),
+        Alchemist(
             resources=GUILD_B['resources'],
             lock=alchemists_locks['alchemist-B'],
             factories=guild_factories['b-factories'],
             guild='B'
+        ),
+        Alchemist(
+            resources=GUILD_C['resources'],
+            lock=alchemists_locks['alchemist-C'],
+            factories=guild_factories['c-factories'],
+            guild='C'
+        ),
+        Alchemist(
+            resources=GUILD_C['resources'],
+            lock=alchemists_locks['alchemist-C'],
+            factories=guild_factories['c-factories'],
+            guild='C'
         ),
     ]
 
@@ -295,6 +330,7 @@ def setup_wizard_world():
         },
         'alchemist-A': Lock(),
         'alchemist-B': Lock(),
+        'alchemist-C': Lock(),
     }
     factories = spawn_factories(wizard_locks, alchemists_locks)
     a_factories, b_factories, c_factories, d_factories = [], [], [], []
@@ -315,7 +351,7 @@ def setup_wizard_world():
     wizards = spawn_wizards(factories, wizard_locks)
     alchemists = spawn_alchemists(alchemists_locks, guild_factories)
 
-    return factories + wizards + [WorkerThread(alchemists_locks, factories, alchemists)]
+    return factories + wizards
 
 
 if __name__ == "__main__":
@@ -327,8 +363,6 @@ if __name__ == "__main__":
             threads.append(t)
             t.start()
     except KeyboardInterrupt:
-        pass
-    finally:
         print('Ok! End for today! Everybody goes home!')
         global FACTORIES_WORK
         FACTORIES_WORK = False
@@ -341,6 +375,7 @@ if __name__ == "__main__":
         print('Guild D: {} gold', GUILDS_BANK['D'])
         print('Exitting ...')
         sys.exit()
+
 
 
 
