@@ -145,21 +145,19 @@ class Warlock(MyThread):
         self.locks = locks
 
     def run(self):
-        random_factory = random.choice(self.factories)
         while True:
+            time.sleep(WARLOCK_WAIT)
+            random_factory = random.choice(self.factories)
             curse_lock = self.locks[random_factory.rtype]['curse']
-            curse_lock.acquire()
-            try:
-                self.cast_curse(random_factory)
-            finally:
-                random_factory = random.choice(self.factories)
-                curse_lock.release()
-                time.sleep(WARLOCK_WAIT)
+            no_curses = self.locks[random_factory.rtype]['no_curses']
+            with curse_lock:
+                self.cast_curse(random_factory, no_curses)
 
-    def cast_curse(self, factory):
-        print("Warlock {} casts curse on {} factory".format(id(self), factory.rtype))
-        time.sleep(WARLOCK_WAIT)
+    def cast_curse(self, factory, no_curses):
+        if factory.curses == 0:
+            no_curses.acquire()
         factory.curses += 1
+        print("Warlock {} casts curse on {} factory (has {} curses)".format(id(self), factory.rtype, factory.curses))
 
 
 class Sorcerer(MyThread):
@@ -168,52 +166,45 @@ class Sorcerer(MyThread):
         self.locks = locks
 
     def run(self):
-        random_factory = random.choice(self.factories)
         while True:
-            curse_lock = self.locks[random_factory.rtype]['curse']
-            curse_lock.acquire()
-            try:
-                if random_factory.curses > 0:
-                    self.remove_curse(random_factory)
-                    ## jesli to jest ostatnia klatwa na tej fabryce to uwolnij lock dla tej fabryki ktory jej powie ze
-                    ## moze juz pracowac
-            finally:
-                random_factory = random.choice(self.factories)
-                curse_lock.release()
-                time.sleep(SORCERER_WAIT)
+            time.sleep(SORCERER_WAIT)
+            for f in self.factories:
+                no_curses = self.locks[f.rtype]['no_curses']
+                curse_lock = self.locks[f.rtype]['curse']
+                with curse_lock:
+                    if f.curses > 0:
+                        self.remove_curse(f, no_curses)
 
-    def remove_curse(self, factory):
-        print("Sorcerer {} removes curse on {} factory".format(id(self), factory.rtype))
-        time.sleep(SORCERER_WAIT)
+    def remove_curse(self, factory, no_curses):
+        if factory.curses == 1:
+            no_curses.release()
         factory.curses -= 1
+        print("Sorc {} cleans curse from {} factory (has {} curses)".format(id(self), factory.rtype, factory.curses))
 
 
 class Factory(MyThread):
     ## Semafor z informacja o tym ze jest pusty kontener i klatwy (czekanie na mozliwosc produkcji)
     ## jednym albo dwoma
 
-    def __init__(self, resources, curses, rtype, c_lock, r_lock):
+    def __init__(self, resources, curses, rtype, c_lock, r_lock, c_empty):
         self.resources = resources
         self.curses = curses
         self.rtype = rtype
         self.c_lock = c_lock
         self.r_lock = r_lock
+        self.c_empty = c_empty
 
     def run(self):
         while FACTORIES_WORK:
-            self.c_lock.acquire()
-            self.r_lock.acquire()
-            try:
-                self.start_production()
-            finally:
-                self.c_lock.release()
-                self.r_lock.release()
+            time.sleep(PRODUCTION_WAIT)
+            with self.c_empty:
                 time.sleep(PRODUCTION_WAIT)
+                self.start_production()
 
     def start_production(self):
         print("Factory {} has now {} resources [{} curses]".format(
             self.rtype, len(self.resources), self.curses))
-        while len(self.resources) < FACTORY_CAPACITY and self.curses == 0:
+        while len(self.resources) < FACTORY_CAPACITY:
             time.sleep(PRODUCTION_WAIT)
             self.resources.append(Resource(rtype=self.rtype))
         print("Factory {} has now {} resources [{} curses]".format(
@@ -293,28 +284,31 @@ def spawn_factories(wizard_locks, alchemists_locks):
     return [
         Factory(resources=[], curses=0, rtype=Resource.TYPES['lead'],
                 c_lock=wizard_locks['lead']['curse'],
-                r_lock=alchemists_locks['lead']['resource']),
+                r_lock=alchemists_locks['lead']['resource'],
+                c_empty=wizard_locks['lead']['no_curses']),
         Factory(resources=[], curses=0, rtype=Resource.TYPES['sulfur'],
                 c_lock=wizard_locks['sulfur']['curse'],
-                r_lock=alchemists_locks['sulfur']['resource']),
+                r_lock=alchemists_locks['sulfur']['resource'],
+                c_empty=wizard_locks['sulfur']['no_curses']),
         Factory(resources=[], curses=0, rtype=Resource.TYPES['mercury'],
                 c_lock=wizard_locks['mercury']['curse'],
-                r_lock=alchemists_locks['mercury']['resource'])
+                r_lock=alchemists_locks['mercury']['resource'],
+                c_empty=wizard_locks['mercury']['no_curses'])
     ]
 
 
 def setup_wizard_world():
     wizard_locks = {
         'lead': {
-            'empty': Lock(),
+            'no_curses': Lock(),
             'curse': Lock()
         },
         'mercury': {
-            'empty': Lock(),
+            'no_curses': Lock(),
             'curse': Lock()
         },
         'sulfur': {
-            'empty': Lock(),
+            'no_curses': Lock(),
             'curse': Lock()
         },
     }
@@ -356,31 +350,7 @@ def setup_wizard_world():
 
 if __name__ == "__main__":
     threads = []
-    signal.signal(signal.SIGINT, signal.default_int_handler)
-    try:
-        for obj in setup_wizard_world():
-            t = obj.get_thread()
-            threads.append(t)
-            t.start()
-    except KeyboardInterrupt:
-        print('Ok! End for today! Everybody goes home!')
-        global FACTORIES_WORK
-        FACTORIES_WORK = False
-        print("!")
-        for t in threads:
-            t.join()
-        print('Guild A: {} gold', GUILDS_BANK['A'])
-        print('Guild B: {} gold', GUILDS_BANK['B'])
-        print('Guild C: {} gold', GUILDS_BANK['C'])
-        print('Guild D: {} gold', GUILDS_BANK['D'])
-        print('Exitting ...')
-        sys.exit()
-
-
-
-
-# PROPER SOLUTION:
-# each process should be treated equally
-# it should be independent on the speed of processes
-# the conflicts should be solved in finite time
-# the parts of processes, which are outside the critical section, should be independent
+    for obj in setup_wizard_world():
+        t = obj.get_thread()
+        threads.append(t)
+        t.start()
