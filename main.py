@@ -42,17 +42,6 @@ class MyThread:
 
 
 class WorkerThread(MyThread):
-    # Czeka na lead, mercury, sulfur
-    # Jak zdobedzie wszystkie 3 to losuje jedna z czterech gildii
-    # I uwalnia lock dla alchemisty z tej wylosowanej gildii
-
-    ## Nieefektywne budzenie jezeli jest duzo takich co nie moga byc
-    ## Tysiac alchemistow A i jeden alchemista B
-
-    ## Losowanie jeden z czterech gildii,
-    ## sprawdzenie dla wylosowanej gildii dostepnosci jej resourcow
-    ##
-
     ## nie potrzebuje locka na kazdy tym alchemisty
     ## wystarczy lock na 'alchemist' bo i tak obsluguje go one at a time :)
 
@@ -64,34 +53,33 @@ class WorkerThread(MyThread):
         self.alchemists = alchemists
 
     def run(self):
-        random.shuffle(self.alchemists)
-        alchemists_iterator = iter(self.alchemists)
-        while True:
-            try:
-                next_alchemist = next(alchemists_iterator)
-                resources_locks, resources_factories, \
-                    alchemist_lock, alchemist_thread = self.alchemist_preparation(next_alchemist)
-            except StopIteration:
-                break
-            try:
-                for lock in resources_locks:
-                    lock.acquire()
-                print('All locks acqured')
-                factories_current_stock = [len(f.resources) for f in resources_factories]
+        mercury_lock = self.alchemists_locks['mercury']['resource']
+        lead_lock = self.alchemists_locks['lead']['resource']
+        sulfur_lock = self.alchemists_locks['sulfur']['resource']
+        while len(self.alchemists):
+            time.sleep(PRODUCTION_WAIT)
+            mercury_lock.acquire()
+            lead_lock.acquire()
+            sulfur_lock.acquire()
+            factories_current_stock = [len(f.resources) for f in self.factories]
+            print(factories_current_stock)
+            if all(value > 0 for value in factories_current_stock):
+                chosen_guild = []
+                while not chosen_guild:
+                    letter = random.choice(['A', 'B', 'C'])
+                    chosen_guild = [alchemist for alchemist in self.alchemists if alchemist.guild == letter]
+                chosen_alchemist = random.choice(chosen_guild)
+                resources_locks, resources_factories, alchemist_lock, alchemist_thread = \
+                    self.alchemist_preparation(chosen_alchemist)
                 if all(value > 0 for value in factories_current_stock):
                     alchemist_lock.release()
-                    ## Manager will release, and all alchemists will begin
-                    ## reacquiring the lock. I dont want this. I want one
-                    ## release from manager, one acquire from one alchemist.
-                    ## Then alchemists cannot reacquire unless manager acquires
-                    ## and releases it once again.
                     alchemist_thread.join()
-                    alchemist_lock.acquire()
+                    self.alchemists.remove(chosen_alchemist)
                     print('Ok alchemist has finished reading')
-                    ## free another alchemist
-            finally:
-                for lock in resources_locks:
-                    lock.release()
+            mercury_lock.release()
+            lead_lock.release()
+            sulfur_lock.release()
+        raise ValueError(len(self.alchemists))
 
     def alchemist_preparation(self, next_alchemist):
         print('Acquiring alchemist {} lock.'.format(next_alchemist.guild))
@@ -128,7 +116,6 @@ class Alchemist(MyThread):
             print('I know that my resources are available! I get one of each :)')
             for f in self.factories:
                 f.resources.pop()
-
             print("Factory {} has now {} resources".format(
                 self.factories[0].rtype, len(self.factories[0].resources)))
             print("Factory {} has now {} resources".format(
@@ -196,16 +183,15 @@ class Factory(MyThread):
 
     def run(self):
         while FACTORIES_WORK:
-            time.sleep(PRODUCTION_WAIT)
             with self.c_empty:
-                time.sleep(PRODUCTION_WAIT)
-                self.start_production()
+                with self.r_lock:
+                    self.start_production()
+            time.sleep(PRODUCTION_WAIT)
 
     def start_production(self):
         print("Factory {} has now {} resources [{} curses]".format(
             self.rtype, len(self.resources), self.curses))
         while len(self.resources) < FACTORY_CAPACITY:
-            time.sleep(PRODUCTION_WAIT)
             self.resources.append(Resource(rtype=self.rtype))
         print("Factory {} has now {} resources [{} curses]".format(
             self.rtype, len(self.resources), self.curses))
@@ -255,6 +241,24 @@ def spawn_alchemists(alchemists_locks, guild_factories):
             lock=alchemists_locks['alchemist-B'],
             factories=guild_factories['b-factories'],
             guild='B'
+        ),
+        Alchemist(
+            resources=GUILD_B['resources'],
+            lock=alchemists_locks['alchemist-B'],
+            factories=guild_factories['b-factories'],
+            guild='B'
+        ),
+        Alchemist(
+            resources=GUILD_B['resources'],
+            lock=alchemists_locks['alchemist-B'],
+            factories=guild_factories['b-factories'],
+            guild='B'
+        ),
+        Alchemist(
+            resources=GUILD_C['resources'],
+            lock=alchemists_locks['alchemist-C'],
+            factories=guild_factories['c-factories'],
+            guild='C'
         ),
         Alchemist(
             resources=GUILD_C['resources'],
@@ -345,7 +349,7 @@ def setup_wizard_world():
     wizards = spawn_wizards(factories, wizard_locks)
     alchemists = spawn_alchemists(alchemists_locks, guild_factories)
 
-    return factories + wizards
+    return factories + wizards + [WorkerThread(alchemists_locks, factories, alchemists)]
 
 
 if __name__ == "__main__":
