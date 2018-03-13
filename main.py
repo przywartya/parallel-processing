@@ -1,24 +1,57 @@
 import time
 import random
-import signal
-import sys
+from pprint import pprint
 from threading import Thread
 from threading import Lock
 
 
 NUMBER_OF_WARLOCKS = 3
 NUMBER_OF_SORCERERS = 3
-NUMBER_OF_ALCHEMISTS = 3
+NUMBER_OF_ALCHEMISTS_A = 3
+NUMBER_OF_ALCHEMISTS_B = 3
+NUMBER_OF_ALCHEMISTS_C = 3
+NUMBER_OF_ALCHEMISTS_D = 3
 FACTORY_CAPACITY = 2
 PRODUCTION_WAIT = 0.5
 WARLOCK_WAIT = 1
-SORCERER_WAIT = 0.5
-FACTORIES_WORK = True
+SORCERER_WAIT = 1.5
+WORK = True
 GUILDS_BANK = {
     'A': 0,
     'B': 0,
     'C': 0,
     'D': 0,
+}
+LOCK_BANK = {
+    'curse_locks': {
+        'lead': {
+            'no_curses': Lock(),
+            'curse': Lock()
+        },
+        'mercury': {
+            'no_curses': Lock(),
+            'curse': Lock()
+        },
+        'sulfur': {
+            'no_curses': Lock(),
+            'curse': Lock()
+        },
+    },
+    'resource_locks': {
+        'lead': {
+            'resource': Lock(),
+        },
+        'mercury': {
+            'resource': Lock(),
+        },
+        'sulfur': {
+            'resource': Lock(),
+        },
+        'alchemist-A': Lock(),
+        'alchemist-B': Lock(),
+        'alchemist-C': Lock(),
+        'alchemist-D': Lock(),
+    }
 }
 
 
@@ -53,10 +86,10 @@ class WorkerThread(MyThread):
         self.alchemists = alchemists
 
     def run(self):
-        mercury_lock = self.alchemists_locks['mercury']['resource']
-        lead_lock = self.alchemists_locks['lead']['resource']
-        sulfur_lock = self.alchemists_locks['sulfur']['resource']
-        while len(self.alchemists):
+        mercury_lock = LOCK_BANK['resource_locks']['mercury']['resource']
+        lead_lock = LOCK_BANK['resource_locks']['lead']['resource']
+        sulfur_lock = LOCK_BANK['resource_locks']['sulfur']['resource']
+        while len(self.alchemists) and WORK:
             time.sleep(PRODUCTION_WAIT)
             mercury_lock.acquire()
             lead_lock.acquire()
@@ -66,7 +99,7 @@ class WorkerThread(MyThread):
             if all(value > 0 for value in factories_current_stock):
                 chosen_guild = []
                 while not chosen_guild:
-                    letter = random.choice(['A', 'B', 'C'])
+                    letter = random.choice(['A', 'B', 'C', 'D'])
                     chosen_guild = [alchemist for alchemist in self.alchemists if alchemist.guild == letter]
                 chosen_alchemist = random.choice(chosen_guild)
                 resources_locks, resources_factories, alchemist_lock, alchemist_thread = \
@@ -79,7 +112,6 @@ class WorkerThread(MyThread):
             mercury_lock.release()
             lead_lock.release()
             sulfur_lock.release()
-        raise ValueError(len(self.alchemists))
 
     def alchemist_preparation(self, next_alchemist):
         print('Acquiring alchemist {} lock.'.format(next_alchemist.guild))
@@ -116,10 +148,7 @@ class Alchemist(MyThread):
             print('I know that my resources are available! I get one of each :)')
             for f in self.factories:
                 f.resources.pop()
-            print("Factory {} has now {} resources".format(
-                self.factories[0].rtype, len(self.factories[0].resources)))
-            print("Factory {} has now {} resources".format(
-                self.factories[1].rtype, len(self.factories[1].resources)))
+                print("Factory {} has now {} resources".format(f.rtype, len(f.resources)))
         global GUILDS_BANK
         GUILDS_BANK[self.guild] += 1
         print('Guild {} has {} gold'.format(self.guild, GUILDS_BANK[self.guild]))
@@ -132,7 +161,7 @@ class Warlock(MyThread):
         self.locks = locks
 
     def run(self):
-        while True:
+        while WORK:
             time.sleep(WARLOCK_WAIT)
             random_factory = random.choice(self.factories)
             curse_lock = self.locks[random_factory.rtype]['curse']
@@ -153,7 +182,7 @@ class Sorcerer(MyThread):
         self.locks = locks
 
     def run(self):
-        while True:
+        while WORK:
             time.sleep(SORCERER_WAIT)
             for f in self.factories:
                 no_curses = self.locks[f.rtype]['no_curses']
@@ -182,19 +211,16 @@ class Factory(MyThread):
         self.c_empty = c_empty
 
     def run(self):
-        while FACTORIES_WORK:
-            with self.c_empty:
-                with self.r_lock:
-                    self.start_production()
+        while WORK:
             time.sleep(PRODUCTION_WAIT)
+            with self.r_lock:
+                with self.c_empty:
+                    self.start_production()
 
     def start_production(self):
-        print("Factory {} has now {} resources [{} curses]".format(
-            self.rtype, len(self.resources), self.curses))
         while len(self.resources) < FACTORY_CAPACITY:
             self.resources.append(Resource(rtype=self.rtype))
-        print("Factory {} has now {} resources [{} curses]".format(
-            self.rtype, len(self.resources), self.curses))
+        print("Factory {} has now {} resources [{} curses]".format(self.rtype, len(self.resources), self.curses))
 
 
 def spawn_alchemists(alchemists_locks, guild_factories):
@@ -217,120 +243,66 @@ def spawn_alchemists(alchemists_locks, guild_factories):
         'resources': [mercury, sulfur, lead],
         'alchemists': []
     }
-    return [
-        Alchemist(
+    alchemists = []
+    for i in range(0, NUMBER_OF_ALCHEMISTS_A):
+        alchemists.append(Alchemist(
             resources=GUILD_A['resources'],
             lock=alchemists_locks['alchemist-A'],
             factories=guild_factories['a-factories'],
             guild='A',
-        ),
-        Alchemist(
-            resources=GUILD_A['resources'],
-            lock=alchemists_locks['alchemist-A'],
-            factories=guild_factories['a-factories'],
-            guild='A'
-        ),
-        Alchemist(
-            resources=GUILD_A['resources'],
-            lock=alchemists_locks['alchemist-A'],
-            factories=guild_factories['a-factories'],
-            guild='A'
-        ),
-        Alchemist(
+        ))
+    for i in range(0, NUMBER_OF_ALCHEMISTS_B):
+        alchemists.append(Alchemist(
             resources=GUILD_B['resources'],
             lock=alchemists_locks['alchemist-B'],
             factories=guild_factories['b-factories'],
             guild='B'
-        ),
-        Alchemist(
-            resources=GUILD_B['resources'],
-            lock=alchemists_locks['alchemist-B'],
-            factories=guild_factories['b-factories'],
-            guild='B'
-        ),
-        Alchemist(
-            resources=GUILD_B['resources'],
-            lock=alchemists_locks['alchemist-B'],
-            factories=guild_factories['b-factories'],
-            guild='B'
-        ),
-        Alchemist(
+        ))
+    for i in range(0, NUMBER_OF_ALCHEMISTS_C):
+        alchemists.append(Alchemist(
             resources=GUILD_C['resources'],
             lock=alchemists_locks['alchemist-C'],
             factories=guild_factories['c-factories'],
             guild='C'
-        ),
-        Alchemist(
-            resources=GUILD_C['resources'],
-            lock=alchemists_locks['alchemist-C'],
-            factories=guild_factories['c-factories'],
-            guild='C'
-        ),
-        Alchemist(
-            resources=GUILD_C['resources'],
-            lock=alchemists_locks['alchemist-C'],
-            factories=guild_factories['c-factories'],
-            guild='C'
-        ),
-    ]
+        ))
+    for i in range(0, NUMBER_OF_ALCHEMISTS_D):
+        alchemists.append(Alchemist(
+            resources=GUILD_D['resources'],
+            lock=alchemists_locks['alchemist-D'],
+            factories=guild_factories['d-factories'],
+            guild='D',
+        ))
+    return alchemists
 
 
-def spawn_wizards(factories, wizard_locks):
+def spawn_wizards(factories):
     wizards = []
     for i in range(0, NUMBER_OF_WARLOCKS):
-        wizards.append(Warlock(factories, wizard_locks))
+        wizards.append(Warlock(factories, LOCK_BANK['curse_locks']))
     for i in range(0, NUMBER_OF_SORCERERS):
-        wizards.append(Sorcerer(factories, wizard_locks))
+        wizards.append(Sorcerer(factories, LOCK_BANK['curse_locks']))
     return wizards
 
 
-def spawn_factories(wizard_locks, alchemists_locks):
+def spawn_factories():
     return [
         Factory(resources=[], curses=0, rtype=Resource.TYPES['lead'],
-                c_lock=wizard_locks['lead']['curse'],
-                r_lock=alchemists_locks['lead']['resource'],
-                c_empty=wizard_locks['lead']['no_curses']),
+                c_lock=LOCK_BANK['curse_locks']['lead']['curse'],
+                r_lock=LOCK_BANK['resource_locks']['lead']['resource'],
+                c_empty=LOCK_BANK['curse_locks']['lead']['no_curses']),
         Factory(resources=[], curses=0, rtype=Resource.TYPES['sulfur'],
-                c_lock=wizard_locks['sulfur']['curse'],
-                r_lock=alchemists_locks['sulfur']['resource'],
-                c_empty=wizard_locks['sulfur']['no_curses']),
+                c_lock=LOCK_BANK['curse_locks']['sulfur']['curse'],
+                r_lock=LOCK_BANK['resource_locks']['sulfur']['resource'],
+                c_empty=LOCK_BANK['curse_locks']['sulfur']['no_curses']),
         Factory(resources=[], curses=0, rtype=Resource.TYPES['mercury'],
-                c_lock=wizard_locks['mercury']['curse'],
-                r_lock=alchemists_locks['mercury']['resource'],
-                c_empty=wizard_locks['mercury']['no_curses'])
+                c_lock=LOCK_BANK['curse_locks']['mercury']['curse'],
+                r_lock=LOCK_BANK['resource_locks']['mercury']['resource'],
+                c_empty=LOCK_BANK['curse_locks']['mercury']['no_curses'])
     ]
 
 
 def setup_wizard_world():
-    wizard_locks = {
-        'lead': {
-            'no_curses': Lock(),
-            'curse': Lock()
-        },
-        'mercury': {
-            'no_curses': Lock(),
-            'curse': Lock()
-        },
-        'sulfur': {
-            'no_curses': Lock(),
-            'curse': Lock()
-        },
-    }
-    alchemists_locks = {
-        'lead': {
-            'resource': Lock(),
-        },
-        'mercury': {
-            'resource': Lock(),
-        },
-        'sulfur': {
-            'resource': Lock(),
-        },
-        'alchemist-A': Lock(),
-        'alchemist-B': Lock(),
-        'alchemist-C': Lock(),
-    }
-    factories = spawn_factories(wizard_locks, alchemists_locks)
+    factories = spawn_factories()
     a_factories, b_factories, c_factories, d_factories = [], [], [], []
     guild_factories = {
         'a-factories': a_factories,
@@ -346,10 +318,10 @@ def setup_wizard_world():
         if factory.rtype == 'lead' or factory.rtype == 'sulfur':
             c_factories.append(factory)
         d_factories.append(factory)
-    wizards = spawn_wizards(factories, wizard_locks)
-    alchemists = spawn_alchemists(alchemists_locks, guild_factories)
+    wizards = spawn_wizards(factories)
+    alchemists = spawn_alchemists(LOCK_BANK['resource_locks'], guild_factories)
 
-    return factories + wizards + [WorkerThread(alchemists_locks, factories, alchemists)]
+    return factories + wizards + [WorkerThread(LOCK_BANK['resource_locks'], factories, alchemists)]
 
 
 if __name__ == "__main__":
@@ -357,4 +329,18 @@ if __name__ == "__main__":
     for obj in setup_wizard_world():
         t = obj.get_thread()
         threads.append(t)
+    print("\nWizard world emerges!\n")
+    start = time.time()
+    for t in threads:
         t.start()
+    time.sleep(5)
+    global WORK
+    WORK = False
+    for t in threads:
+        t.join()
+    end = time.time()
+    print("Wizard world collapses. It lasted: " + str(end - start) + " seconds. Guild bank state: ")
+    pprint(GUILDS_BANK)
+
+## jak zrobie to co powyzej to moge sprobowac zamienic resource lock na jakies
+## sygnalizowanie przez alchemsitow (ale to juz jest hardkor)
