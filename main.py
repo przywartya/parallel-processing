@@ -75,11 +75,6 @@ class MyThread:
 
 
 class WorkerThread(MyThread):
-    ## nie potrzebuje locka na kazdy tym alchemisty
-    ## wystarczy lock na 'alchemist' bo i tak obsluguje go one at a time :)
-
-    ## jak sie nic nie wydarzylo to nie ma powodu zeby sprawdzac
-    ## czyli wyslij z fabryki wiadomosc ze moze juz byc uzyta
     def __init__(self, alchemists_locks, factories, alchemists):
         self.alchemists_locks = alchemists_locks
         self.factories = factories
@@ -94,45 +89,21 @@ class WorkerThread(MyThread):
             mercury_lock.acquire()
             lead_lock.acquire()
             sulfur_lock.acquire()
-            factories_current_stock = [len(f.resources) for f in self.factories]
-            print(factories_current_stock)
-            if all(value > 0 for value in factories_current_stock):
+            if all(value > 0 for value in [len(f.resources) for f in self.factories]):
                 chosen_guild = []
                 while not chosen_guild:
                     letter = random.choice(['A', 'B', 'C', 'D'])
                     chosen_guild = [alchemist for alchemist in self.alchemists if alchemist.guild == letter]
                 chosen_alchemist = random.choice(chosen_guild)
-                resources_locks, resources_factories, alchemist_lock, alchemist_thread = \
-                    self.alchemist_preparation(chosen_alchemist)
-                if all(value > 0 for value in factories_current_stock):
-                    alchemist_lock.release()
-                    alchemist_thread.join()
-                    self.alchemists.remove(chosen_alchemist)
-                    print('Ok alchemist has finished reading')
+                print('[Alchemist {}] starts.'.format(chosen_alchemist.guild))
+                alchemist_thread = chosen_alchemist.get_thread()
+                alchemist_thread.start()
+                alchemist_thread.join()
+                self.alchemists.remove(chosen_alchemist)
+                print('[Alchemist {}] has finished.'.format(chosen_alchemist.guild))
             mercury_lock.release()
             lead_lock.release()
             sulfur_lock.release()
-
-    def alchemist_preparation(self, next_alchemist):
-        print('Acquiring alchemist {} lock.'.format(next_alchemist.guild))
-        alchemist_lock = self.alchemists_locks['alchemist-{}'.format(next_alchemist.guild)]
-        alchemist_lock.acquire()
-        next_alchemist_resources = [r.rtype for r in next_alchemist.resources]
-        resources_locks = []
-        for r in next_alchemist_resources:
-            resources_locks.append(self.alchemists_locks[r]['resource'])
-        resources_factories = []
-        for r in next_alchemist_resources:
-            for f in self.factories:
-                if f.rtype == r:
-                    resources_factories.append(f)
-        alchemist_thread = self.free_alchemist(next_alchemist)
-        return resources_locks, resources_factories, alchemist_lock, alchemist_thread
-
-    def free_alchemist(self, a):
-        th = a.get_thread()
-        th.start()
-        return th
 
 
 class Alchemist(MyThread):
@@ -143,16 +114,13 @@ class Alchemist(MyThread):
         self.guild = guild
 
     def run(self):
-        print('Alchemist ({}+{}) runs'.format(self.resources[0].rtype, self.resources[1].rtype))
         with self.lock:
-            print('I know that my resources are available! I get one of each :)')
             for f in self.factories:
                 f.resources.pop()
-                print("Factory {} has now {} resources".format(f.rtype, len(f.resources)))
+                print("(alchemist-action) [Factory {}] {} resources".format(f.rtype, len(f.resources)))
         global GUILDS_BANK
         GUILDS_BANK[self.guild] += 1
-        print('Guild {} has {} gold'.format(self.guild, GUILDS_BANK[self.guild]))
-        print('Alchemist {} disappears'.format(id(self)))
+        print('[Guild {}] {} gold'.format(self.guild, GUILDS_BANK[self.guild]))
 
 
 class Warlock(MyThread):
@@ -173,7 +141,7 @@ class Warlock(MyThread):
         if factory.curses == 0:
             no_curses.acquire()
         factory.curses += 1
-        print("Warlock {} casts curse on {} factory (has {} curses)".format(id(self), factory.rtype, factory.curses))
+        print("[Warlock {}] {} factory [{} curses]".format(id(self), factory.rtype, factory.curses))
 
 
 class Sorcerer(MyThread):
@@ -195,7 +163,7 @@ class Sorcerer(MyThread):
         if factory.curses == 1:
             no_curses.release()
         factory.curses -= 1
-        print("Sorc {} cleans curse from {} factory (has {} curses)".format(id(self), factory.rtype, factory.curses))
+        print("[Sorc {}] {} factory [{} curses]".format(id(self), factory.rtype, factory.curses))
 
 
 class Factory(MyThread):
@@ -213,6 +181,7 @@ class Factory(MyThread):
     def run(self):
         while WORK:
             time.sleep(PRODUCTION_WAIT)
+            print("[Factory {}] {} resources [{} curses]".format(self.rtype, len(self.resources), self.curses))
             with self.r_lock:
                 with self.c_empty:
                     self.start_production()
@@ -220,7 +189,6 @@ class Factory(MyThread):
     def start_production(self):
         while len(self.resources) < FACTORY_CAPACITY:
             self.resources.append(Resource(rtype=self.rtype))
-        print("Factory {} has now {} resources [{} curses]".format(self.rtype, len(self.resources), self.curses))
 
 
 def spawn_alchemists(alchemists_locks, guild_factories):
