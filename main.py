@@ -1,8 +1,7 @@
 import time
 import random
-from pprint import pprint
 from threading import Thread
-from threading import Lock
+from threading import Lock, Semaphore
 
 
 NUMBER_OF_WARLOCKS = 3
@@ -40,14 +39,22 @@ LOCK_BANK = {
     'resource_locks': {
         'lead': {
             'resource': Lock(),
+            'test': Semaphore(value=0)
         },
         'mercury': {
             'resource': Lock(),
+            'test': Semaphore(value=0)
         },
         'sulfur': {
             'resource': Lock(),
+            'test': Semaphore(value=0)
         },
-    }
+    },
+    'A': Semaphore(value=0),
+    'B': Semaphore(value=0),
+    'C': Semaphore(value=0),
+    'D': Semaphore(value=0),
+    'M': Semaphore(value=0)
 }
 
 
@@ -80,22 +87,20 @@ class WorkerThread(MyThread):
         lead_lock = LOCK_BANK['resource_locks']['lead']['resource']
         sulfur_lock = LOCK_BANK['resource_locks']['sulfur']['resource']
         while len(self.alchemists) and WORK:
-            time.sleep(PRODUCTION_WAIT)
+            chosen_guild = []
+            while not chosen_guild:
+                letter = random.choice(['A', 'B', 'C', 'D'])
+                chosen_guild = [alchemist for alchemist in self.alchemists if alchemist.guild == letter]
+            chosen_alchemist = random.choice(chosen_guild)
             mercury_lock.acquire()
             lead_lock.acquire()
             sulfur_lock.acquire()
             if all(value > 0 for value in [len(f.resources) for f in self.factories]):
-                chosen_guild = []
-                while not chosen_guild:
-                    letter = random.choice(['A', 'B', 'C', 'D'])
-                    chosen_guild = [alchemist for alchemist in self.alchemists if alchemist.guild == letter]
-                chosen_alchemist = random.choice(chosen_guild)
-                print('[Alchemist {}] starts.'.format(chosen_alchemist.guild))
-                alchemist_thread = chosen_alchemist.get_thread()
-                alchemist_thread.start()
-                alchemist_thread.join()
+                print('(manager-action) [Alchemist {}] starts.'.format(chosen_alchemist.guild))
+                LOCK_BANK[chosen_alchemist.guild].release()
+                LOCK_BANK['M'].acquire()
                 self.alchemists.remove(chosen_alchemist)
-                print('[Alchemist {}] has finished.'.format(chosen_alchemist.guild))
+                print('(manager-action) [Alchemist {}] has finished.'.format(chosen_alchemist.guild))
             mercury_lock.release()
             lead_lock.release()
             sulfur_lock.release()
@@ -108,12 +113,17 @@ class Alchemist(MyThread):
         self.guild = guild
 
     def run(self):
+        print('(alchemist-action) Alchemist {} [guild {}] started'.format(id(self), self.guild))
+        LOCK_BANK[self.guild].acquire()
         for f in self.factories:
+            if len(f.resources) == 2:
+                LOCK_BANK['resource_locks'][f.rtype]['test'].release()
             f.resources.pop()
             print("(alchemist-action) [Factory {}] {} resources".format(f.rtype, len(f.resources)))
         global GUILDS_BANK
         GUILDS_BANK[self.guild] += 1
-        print('[Guild {}] {} gold'.format(self.guild, GUILDS_BANK[self.guild]))
+        print('(alchemist-action) [Guild {}] {} gold'.format(self.guild, GUILDS_BANK[self.guild]))
+        LOCK_BANK['M'].release()
 
 
 class Warlock(MyThread):
@@ -131,7 +141,7 @@ class Warlock(MyThread):
         if factory.curses == 0:
             LOCK_BANK['curse_locks'][factory.rtype]['no_curses'].acquire()
         factory.curses += 1
-        print("[Warlock {}] {} factory [{} curses]".format(id(self), factory.rtype, factory.curses))
+        print("(warlock-action) [Warlock {}] {} factory [{} curses]".format(id(self), factory.rtype, factory.curses))
 
 
 class Sorcerer(MyThread):
@@ -150,13 +160,10 @@ class Sorcerer(MyThread):
         if factory.curses == 1:
             LOCK_BANK['curse_locks'][factory.rtype]['no_curses'].release()
         factory.curses -= 1
-        print("[Sorc {}] {} factory [{} curses]".format(id(self), factory.rtype, factory.curses))
+        print("(sorcerer-action) [Sorc {}] {} factory [{} curses]".format(id(self), factory.rtype, factory.curses))
 
 
 class Factory(MyThread):
-    ## Semafor z informacja o tym ze jest pusty kontener i klatwy (czekanie na mozliwosc produkcji)
-    ## jednym albo dwoma
-
     def __init__(self, resources, curses, rtype, c_lock, r_lock, c_empty):
         self.resources = resources
         self.curses = curses
@@ -168,14 +175,17 @@ class Factory(MyThread):
     def run(self):
         while WORK:
             time.sleep(PRODUCTION_WAIT)
-            with self.c_empty:
-                with self.r_lock:
-                    self.start_production()
+            self.start_production()
 
     def start_production(self):
-        while len(self.resources) < FACTORY_CAPACITY:
-            print("[Factory {}] {} resources [{} curses]".format(self.rtype, len(self.resources), self.curses))
-            self.resources.append(Resource(rtype=self.rtype))
+        if len(self.resources) == 2:
+            LOCK_BANK['resource_locks'][self.rtype]['test'].acquire()
+        else:
+            with self.c_empty:
+                with self.r_lock:
+                    self.resources.append(Resource(rtype=self.rtype))
+            print("(factory-action) [Factory {}] {} resources [{} curses]".format(self.rtype, len(self.resources),
+                                                                                  self.curses))
 
 
 def spawn_alchemists(guild_factories):
@@ -271,14 +281,10 @@ def setup_wizard_world():
         d_factories.append(factory)
     wizards = spawn_wizards(factories)
     alchemists = spawn_alchemists(guild_factories)
-
-    return factories + wizards + [WorkerThread(factories, alchemists)]
+    return factories + wizards + alchemists + [WorkerThread(factories, alchemists)]
 
 
 if __name__ == "__main__":
     for obj in setup_wizard_world():
         t = obj.get_thread()
         t.start()
-
-## jak zrobie to co powyzej to moge sprobowac zamienic resource lock na jakies
-## sygnalizowanie przez alchemsitow (ale to juz jest hardkor)
