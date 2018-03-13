@@ -38,15 +38,15 @@ LOCK_BANK = {
     },
     'resource_locks': {
         'lead': {
-            'resource': Lock(),
+            'resource': Semaphore(value=0),
             'test': Semaphore(value=0)
         },
         'mercury': {
-            'resource': Lock(),
+            'resource': Semaphore(value=0),
             'test': Semaphore(value=0)
         },
         'sulfur': {
-            'resource': Lock(),
+            'resource': Semaphore(value=0),
             'test': Semaphore(value=0)
         },
     },
@@ -77,35 +77,6 @@ class MyThread:
         raise NotImplementedError
 
 
-class WorkerThread(MyThread):
-    def __init__(self, factories, alchemists):
-        self.factories = factories
-        self.alchemists = alchemists
-
-    def run(self):
-        mercury_lock = LOCK_BANK['resource_locks']['mercury']['resource']
-        lead_lock = LOCK_BANK['resource_locks']['lead']['resource']
-        sulfur_lock = LOCK_BANK['resource_locks']['sulfur']['resource']
-        while len(self.alchemists) and WORK:
-            chosen_guild = []
-            while not chosen_guild:
-                letter = random.choice(['A', 'B', 'C', 'D'])
-                chosen_guild = [alchemist for alchemist in self.alchemists if alchemist.guild == letter]
-            chosen_alchemist = random.choice(chosen_guild)
-            mercury_lock.acquire()
-            lead_lock.acquire()
-            sulfur_lock.acquire()
-            if all(value > 0 for value in [len(f.resources) for f in self.factories]):
-                print('(manager-action) [Alchemist {}] starts.'.format(chosen_alchemist.guild))
-                LOCK_BANK[chosen_alchemist.guild].release()
-                LOCK_BANK['M'].acquire()
-                self.alchemists.remove(chosen_alchemist)
-                print('(manager-action) [Alchemist {}] has finished.'.format(chosen_alchemist.guild))
-            mercury_lock.release()
-            lead_lock.release()
-            sulfur_lock.release()
-
-
 class Alchemist(MyThread):
     def __init__(self, resources, factories, guild):
         self.resources = resources
@@ -113,7 +84,7 @@ class Alchemist(MyThread):
         self.guild = guild
 
     def run(self):
-        print('(alchemist-action) Alchemist {} [guild {}] started'.format(id(self), self.guild))
+        print('(alchemist-action) {} [guild {}] started'.format(id(self), self.guild))
         LOCK_BANK[self.guild].acquire()
         for f in self.factories:
             if len(f.resources) == 2:
@@ -141,7 +112,7 @@ class Warlock(MyThread):
         if factory.curses == 0:
             LOCK_BANK['curse_locks'][factory.rtype]['no_curses'].acquire()
         factory.curses += 1
-        print("(warlock-action) [Warlock {}] {} factory [{} curses]".format(id(self), factory.rtype, factory.curses))
+        print("(warlock-action) [{}] {} factory [{} curses]".format(id(self), factory.rtype, factory.curses))
 
 
 class Sorcerer(MyThread):
@@ -160,7 +131,32 @@ class Sorcerer(MyThread):
         if factory.curses == 1:
             LOCK_BANK['curse_locks'][factory.rtype]['no_curses'].release()
         factory.curses -= 1
-        print("(sorcerer-action) [Sorc {}] {} factory [{} curses]".format(id(self), factory.rtype, factory.curses))
+        print("(sorcerer-action) [{}] {} factory [{} curses]".format(id(self), factory.rtype, factory.curses))
+
+
+class WorkerThread(MyThread):
+    def __init__(self, factories, alchemists):
+        self.factories = factories
+        self.alchemists = alchemists
+
+    def run(self):
+        mercury_lock = LOCK_BANK['resource_locks']['mercury']['resource']
+        lead_lock = LOCK_BANK['resource_locks']['lead']['resource']
+        sulfur_lock = LOCK_BANK['resource_locks']['sulfur']['resource']
+        while len(self.alchemists) and WORK:
+            chosen_guild = []
+            while not chosen_guild:
+                letter = random.choice(['A', 'B', 'C', 'D'])
+                chosen_guild = [alchemist for alchemist in self.alchemists if alchemist.guild == letter]
+            chosen_alchemist = random.choice(chosen_guild)
+            mercury_lock.acquire()
+            lead_lock.acquire()
+            sulfur_lock.acquire()
+            print('(manager-action) [Alchemist {}] starts.'.format(chosen_alchemist.guild))
+            LOCK_BANK[chosen_alchemist.guild].release()
+            LOCK_BANK['M'].acquire()
+            self.alchemists.remove(chosen_alchemist)
+            print('(manager-action) [Alchemist {}] has finished.'.format(chosen_alchemist.guild))
 
 
 class Factory(MyThread):
@@ -179,12 +175,13 @@ class Factory(MyThread):
 
     def start_production(self):
         if len(self.resources) == 2:
+            self.r_lock.release()
             LOCK_BANK['resource_locks'][self.rtype]['test'].acquire()
         else:
             with self.c_empty:
-                with self.r_lock:
-                    self.resources.append(Resource(rtype=self.rtype))
-            print("(factory-action) [Factory {}] {} resources [{} curses]".format(self.rtype, len(self.resources),
+                self.r_lock.release()
+                self.resources.append(Resource(rtype=self.rtype))
+                print("(factory-action) [{}] {} resources [{} curses]".format(self.rtype, len(self.resources),
                                                                                   self.curses))
 
 
