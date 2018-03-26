@@ -77,6 +77,41 @@ class MyThread:
         raise NotImplementedError
 
 
+class WorkerThread(MyThread):
+    def __init__(self, factories, alchemists):
+        self.factories = factories
+        self.alchemists = alchemists
+
+    def run(self):
+        mercury_lock = LOCK_BANK['resource_locks']['mercury']['resource']
+        lead_lock = LOCK_BANK['resource_locks']['lead']['resource']
+        sulfur_lock = LOCK_BANK['resource_locks']['sulfur']['resource']
+        while len(self.alchemists) and WORK:
+            chosen_guild = []
+            while not chosen_guild:
+                letter = random.choice(['A', 'B', 'C', 'D'])
+                chosen_guild = [alchemist for alchemist in self.alchemists if alchemist.guild == letter]
+            chosen_alchemist = random.choice(chosen_guild)
+            mercury_lock.acquire()
+            lead_lock.acquire()
+            sulfur_lock.acquire()
+            if all(value > 0 for value in [len(f.resources) for f in chosen_alchemist.factories]):
+                print('(manager-action) [Alchemist {}] starts.'.format(chosen_alchemist.guild))
+                LOCK_BANK[chosen_alchemist.guild].release()
+                LOCK_BANK['M'].acquire()
+                self.alchemists.remove(chosen_alchemist)
+                print('(manager-action) [Alchemist {}] has finished.'.format(chosen_alchemist.guild))
+            mercury_lock.release()
+            lead_lock.release()
+            sulfur_lock.release()
+            
+        print("\n")
+        print("ALL ALCHEMSITS DONE. ")
+        print("GUILDS BANK. ")
+        print(GUILDS_BANK)
+        print("\n")
+
+
 class Alchemist(MyThread):
     def __init__(self, resources, factories, guild):
         self.resources = resources
@@ -87,7 +122,7 @@ class Alchemist(MyThread):
         print('(alchemist-action) {} [guild {}] started'.format(id(self), self.guild))
         LOCK_BANK[self.guild].acquire()
         for f in self.factories:
-            if len(f.resources) == 2:
+            if len(f.resources) <= 2:
                 LOCK_BANK['resource_locks'][f.rtype]['test'].release()
             f.resources.pop()
             print("(alchemist-action) [Factory {}] {} resources".format(f.rtype, len(f.resources)))
