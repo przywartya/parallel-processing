@@ -39,6 +39,7 @@ class Musician:
         print("[M{}] Sent to {}".format(self.index, addres))
 
     def run(self):
+        # Main question is how to create round synchronization???
         print("[M{}] Started".format(self.index))
         # send v to all its neighbors
         for n in self.neighbors:
@@ -53,29 +54,45 @@ class Musician:
                 wait_for_neighbors -= 1
             if wait_for_neighbors == 0:
                 break
-        print(str(self.position), str(self.priority), messages)
-        return
+        # print(str(self.position), str(self.priority), messages)
         # If my priority is bigger than all my neighbors then I am a winner.
-        if all([self.priority > int(neigh_v) for neigh_v in messages]):
-            # print(self.index, str(self.position), str(self.priority), "WINNER")
+        # If somehow I got not winner in previous round then I also check it.
+        my_state = None
+        singing_neighbors = []
+        if 'not_winner' not in messages and all([self.priority > int(neigh_v) for neigh_v in messages]):
             # Send to all my neighbors that they are losers
             for n in self.neighbors:
                 n.priorities = ['not_winner']
                 self.send_message(str(n.index), "not_winner")
             print("{} WINNER".format(self.index))
+            my_state = "winner"
+            # can start singing
         else:
-            time.sleep(1)
+            time.sleep(.1)
             result, props, message = self.channel.basic_get(queue=queue_name)
             if result:
                 # I have a winner in my neighborhood, so I am a loser :/
                 winner_id = int(props.app_id)
-                for n in neighbors:
+                for n in self.neighbors:
                     if n.index == winner_id:
                         n.priorities = ['winner']
+                        singing_neighbors.append(n)
                 print("{} LOSER".format(self.index))
+                # I have to notify my neighbors that I am loser
+                for n in self.neighbors:
+                    self.send_message(str(n.index), "loser")
             else:
-                print("{} Not loser not winner :P".format(self.index))
-            # raise ValueError(self.index, result, sth, message)
+                print("{} UNDEFINED ;)".format(self.index))
+            
+
+        # wait_for_neighbors = len(self.neighbors)
+        # while True:
+        #     result, _, message = self.channel.basic_get(queue=queue_name)
+        #     if message:
+        #         messages.append(message)
+        #         wait_for_neighbors -= 1
+        #     if wait_for_neighbors == 0:
+        #         break
 
 
 
