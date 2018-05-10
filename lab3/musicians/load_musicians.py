@@ -49,7 +49,9 @@ class Musician:
         message_content = message['content']
         # print("[M{}] {}:{}, messages {}".format(self.index, method.routing_key, message_content, self.messages))
         if message_type == 'first' and self.status != 'loser':
-            self.first_messages.append(int(message_content))
+            if int(message_content) not in self.first_messages:
+                self.first_messages.append(int(message_content))
+            print("[{}]A {} {}".format(self.priority, self.first_messages, len(self.neighbors)))
             if len(self.first_messages) == len(self.neighbors):
                 if all([self.priority > neigh_v for neigh_v in self.first_messages]):
                     print("{} WINNER with value {}".format(self.index, self.priority))
@@ -62,7 +64,7 @@ class Musician:
                     for n in self.neighbors:
                         self.send_message(str(n.index), message)
                     time.sleep(2)
-                    print("{} BECOMING INACTIVE".format(self.index))
+                    print("{} BECOMING INACTIVE".format(self.priority))
                     # SEND TO NEIGHBORS THAT THEY NOW CAN REROLL
                     refresh_losers = {
                         'author': str(self.index),
@@ -79,7 +81,12 @@ class Musician:
             self.how_many_winners -= 1
             self.neighbors = [n for n in self.neighbors if n.index != int(message_author)]
             print("[{}] Refresh losers acquired. How many winers? {}".format(self.priority, self.how_many_winners))
-            print("[{}] Neighbors {}".format(self.priority, self.neighbors))
+            print("[{}] Neighbors {}".format(self.priority, self.first_messages))
+            if not self.neighbors:
+                time.sleep(2)
+                print("{} BECOMING INACTIVE".format(self.priority))
+                ch.basic_cancel(method.consumer_tag)
+                return
             if self.how_many_winners == 0:
                 self.status = None
                 find_first_winner_message = {
@@ -112,32 +119,16 @@ class Musician:
             # AND THEY SHOULD REROLL THE WINNER BETWEEN THEMSELVES
             # (IF THEY ARE NOT LOSERS)
 
-        if message_type == 'loser_to_neighs':
-            find_first_winner_message = {
-                'author': str(self.index),
-                'type': 'first',
-                'content': str(self.priority)
-            }
-            self.neighbors = [n for n in self.neighbors if n.index != int(message_author)]
-            message = json.dumps(find_first_winner_message)
-            for n in self.neighbors:
-                self.send_message(str(n.index), message)
-
-        # # IF MESSAGE IS THAT I AM LOSER THEN I DONT CHECK BELOW
-        # if 'loser' in self.messages:
-        #     # SHOULD SEND TO ALL NEIGHBOURS THAT I AM
-        #     return
-        # if len(self.messages) == len(self.neighbors):
-        #     if all([self.priority > int(neigh_v) for neigh_v in self.messages]):
-        #         print("{} WINNER".format(self.index))
-        #         for n in self.neighbors:
-        #             self.send_message(str(n.index), "loser")
-        #         # CAN START SINGING
-        #         time.sleep(2)
-            # else:
-                # TEGO NIE TRZEBA
-                #MESSAGES FROM THE FIRST ROUND HAVE BEEN DELIVERED
-                #NOW I CAN WAIT FOR MESSAGE FROM WINNER
+        # if message_type == 'loser_to_neighs':
+        #     find_first_winner_message = {
+        #         'author': str(self.index),
+        #         'type': 'first',
+        #         'content': str(self.priority)
+        #     }
+        #     self.neighbors = [n for n in self.neighbors if n.index != int(message_author)]
+        #     message = json.dumps(find_first_winner_message)
+        #     for n in self.neighbors:
+        #         self.send_message(str(n.index), message)
 
     def run(self):
         # Main question is how to create round synchronization???
