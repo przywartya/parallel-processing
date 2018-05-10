@@ -30,12 +30,10 @@ class Rostrum:
                 self.neighs_talking_cvs[k_idx].wait()
                 knight.status.remove('waiting_for_neigh')
                 print("{}. Signalized.".format(knight))
-            # Set talking state.
             knight.status = ['talking']
-            # If kings starts talking he sets status listening to king
+            # When kings starts talking he sets status listening to king
             # for everyone who is not talking
             if self.is_king(k_idx):
-                # omit 0 - it is King himself.
                 for i in range(1, len(self.knights)):
                     if 'not_talking' in self.knights[i].status:
                         self.knights[i].status.append('listening_to_king')
@@ -60,6 +58,7 @@ class Rostrum:
                         right = self.knights[self.knights[i].r_idx]
                         if 'not_talking' in left.status and 'not_talking' in right.status:
                             self.neighs_talking_cvs[i].notify()
+                            i += 1
                     # If Knight is waiting for King to end talking
                     # then simply wake him up. We don't have to check his neighbours
                     # because after he wakes from waiting for the king he checks
@@ -91,12 +90,10 @@ class Rostrum:
                 if 'waiting_for_neigh' in l_neigh.status and 'not_talking' in ll_neigh.status:
                     print("{}. Signal {}.".format(knight, l_neigh))
                     self.neighs_talking_cvs[l_neigh.idx].notify()
-                # ...
-                if 'waiting_for_neigh' in r_neigh.status and 'not_talking' in rr_neigh.status:
+                if 'waiting_for_neigh' in r_neigh.status and 'not_talking' in rr_neigh.status and \
+                        not 'talking' in self.knights[0].status:
                     print("{}. Signal {}.".format(knight, r_neigh))
                     self.neighs_talking_cvs[r_neigh.idx].notify()
-
-
 
     @staticmethod
     def is_king(idx):
