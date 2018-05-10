@@ -1,6 +1,7 @@
 import math
 import time
 import pika
+import json
 from random import randint
 from threading import Thread
 
@@ -22,6 +23,9 @@ class Musician:
         self.channel.queue_bind(exchange='direct_logs',
                                 queue=self.result.method.queue,
                                 routing_key=str(self.index))
+        self.first_messages = []
+        self.status = None
+        self.how_many_winners = 0
         
     def establish_connection(self):
         connection = pika.BlockingConnection(pika.ConnectionParameters('localhost'))
@@ -38,63 +42,120 @@ class Musician:
                                    body=message)
         print("[M{}] Sent to {}".format(self.index, addres))
 
+    def callback(self, ch, method, properties, body):
+        message = json.loads(body)
+        message_author = message['author']
+        message_type = message['type']
+        message_content = message['content']
+        # print("[M{}] {}:{}, messages {}".format(self.index, method.routing_key, message_content, self.messages))
+        if message_type == 'first' and self.status != 'loser':
+            self.first_messages.append(int(message_content))
+            if len(self.first_messages) == len(self.neighbors):
+                if all([self.priority > neigh_v for neigh_v in self.first_messages]):
+                    print("{} WINNER with value {}".format(self.index, self.priority))
+                    winner_to_neighs_message = {
+                        'author': str(self.index),
+                        'type': 'winner_to_neighs',
+                        'content': str(self.priority)
+                    }
+                    message = json.dumps(winner_to_neighs_message)
+                    for n in self.neighbors:
+                        self.send_message(str(n.index), message)
+                    time.sleep(2)
+                    print("{} BECOMING INACTIVE".format(self.index))
+                    # SEND TO NEIGHBORS THAT THEY NOW CAN REROLL
+                    refresh_losers = {
+                        'author': str(self.index),
+                        'type': 'refresh_losers',
+                        'content': str(self.priority)
+                    }
+                    message = json.dumps(refresh_losers)
+                    for n in self.neighbors:
+                        self.send_message(str(n.index), message)
+                    ch.basic_cancel(method.consumer_tag)
+                    return
+        
+        if message_type == 'refresh_losers' and self.status == 'loser':
+            self.how_many_winners -= 1
+            self.neighbors = [n for n in self.neighbors if n.index != int(message_author)]
+            print("[{}] Refresh losers acquired. How many winers? {}".format(self.priority, self.how_many_winners))
+            print("[{}] Neighbors {}".format(self.priority, self.neighbors))
+            if self.how_many_winners == 0:
+                self.status = None
+                find_first_winner_message = {
+                    'author': str(self.index),
+                    'type': 'first',
+                    'content': str(self.priority)
+                }
+                message = json.dumps(find_first_winner_message)
+                for n in self.neighbors:
+                    self.send_message(str(n.index), message)
+
+        if message_type == 'winner_to_neighs':
+            self.how_many_winners += 1
+            self.status = 'loser'
+            winner_index = int(message_content)
+            if winner_index in self.first_messages:
+                self.first_messages.remove(int(message_content))
+            # self.neighbors.remove(message_author)
+            print("{} LOSER: neighbors {}".format(self.priority, self.first_messages))
+            loser_to_neighs_message = {
+                'author': str(self.index),
+                'type': 'loser_to_neighs',
+                'content': str(self.priority)
+            }
+            message = json.dumps(loser_to_neighs_message)
+            for n in self.neighbors:
+                self.send_message(str(n.index), message)
+            # SEND TO ALL NEIGHBORS BUT THE WINNER
+            # THAT YOU ARE A LOSER 
+            # AND THEY SHOULD REROLL THE WINNER BETWEEN THEMSELVES
+            # (IF THEY ARE NOT LOSERS)
+
+        if message_type == 'loser_to_neighs':
+            find_first_winner_message = {
+                'author': str(self.index),
+                'type': 'first',
+                'content': str(self.priority)
+            }
+            self.neighbors = [n for n in self.neighbors if n.index != int(message_author)]
+            message = json.dumps(find_first_winner_message)
+            for n in self.neighbors:
+                self.send_message(str(n.index), message)
+
+        # # IF MESSAGE IS THAT I AM LOSER THEN I DONT CHECK BELOW
+        # if 'loser' in self.messages:
+        #     # SHOULD SEND TO ALL NEIGHBOURS THAT I AM
+        #     return
+        # if len(self.messages) == len(self.neighbors):
+        #     if all([self.priority > int(neigh_v) for neigh_v in self.messages]):
+        #         print("{} WINNER".format(self.index))
+        #         for n in self.neighbors:
+        #             self.send_message(str(n.index), "loser")
+        #         # CAN START SINGING
+        #         time.sleep(2)
+            # else:
+                # TEGO NIE TRZEBA
+                #MESSAGES FROM THE FIRST ROUND HAVE BEEN DELIVERED
+                #NOW I CAN WAIT FOR MESSAGE FROM WINNER
+
     def run(self):
         # Main question is how to create round synchronization???
         print("[M{}] Started".format(self.index))
         # send v to all its neighbors
+        find_first_winner_message = {
+            'author': str(self.index),
+            'type': 'first',
+            'content': str(self.priority)
+        }
+        message = json.dumps(find_first_winner_message)
         for n in self.neighbors:
-            self.send_message(str(n.index), str(self.priority))
+            self.send_message(str(n.index), message)
         queue_name = self.result.method.queue
-        messages = []
-        wait_for_neighbors = len(self.neighbors)
-        while True:
-            result, _, message = self.channel.basic_get(queue=queue_name)
-            if message:
-                messages.append(message)
-                wait_for_neighbors -= 1
-            if wait_for_neighbors == 0:
-                break
-        # print(str(self.position), str(self.priority), messages)
-        # If my priority is bigger than all my neighbors then I am a winner.
-        # If somehow I got not winner in previous round then I also check it.
-        my_state = None
-        singing_neighbors = []
-        if 'not_winner' not in messages and all([self.priority > int(neigh_v) for neigh_v in messages]):
-            # Send to all my neighbors that they are losers
-            for n in self.neighbors:
-                n.priorities = ['not_winner']
-                self.send_message(str(n.index), "not_winner")
-            print("{} WINNER".format(self.index))
-            my_state = "winner"
-            # can start singing
-        else:
-            time.sleep(.1)
-            result, props, message = self.channel.basic_get(queue=queue_name)
-            if result:
-                # I have a winner in my neighborhood, so I am a loser :/
-                winner_id = int(props.app_id)
-                for n in self.neighbors:
-                    if n.index == winner_id:
-                        n.priorities = ['winner']
-                        singing_neighbors.append(n)
-                print("{} LOSER".format(self.index))
-                # I have to notify my neighbors that I am loser
-                for n in self.neighbors:
-                    self.send_message(str(n.index), "loser")
-            else:
-                print("{} UNDEFINED ;)".format(self.index))
-            
-
-        # wait_for_neighbors = len(self.neighbors)
-        # while True:
-        #     result, _, message = self.channel.basic_get(queue=queue_name)
-        #     if message:
-        #         messages.append(message)
-        #         wait_for_neighbors -= 1
-        #     if wait_for_neighbors == 0:
-        #         break
-
-
+        self.channel.basic_consume(self.callback,
+                                   queue=queue_name,
+                                   no_ack=True)
+        self.channel.start_consuming()
 
     def print_neighbors(self):
         for n in self.neighbors:
