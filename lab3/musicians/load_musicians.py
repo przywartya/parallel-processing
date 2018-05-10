@@ -120,21 +120,32 @@ class Musician:
             # AND THEY SHOULD REROLL THE WINNER BETWEEN THEMSELVES
             # (IF THEY ARE NOT LOSERS)
 
-        # if message_type == 'loser_to_neighs':
-        #     find_first_winner_message = {
-        #         'author': str(self.index),
-        #         'type': 'first',
-        #         'content': str(self.priority)
-        #     }
-        #     self.neighbors = [n for n in self.neighbors if n.index != int(message_author)]
-        #     message = json.dumps(find_first_winner_message)
-        #     for n in self.neighbors:
-        #         self.send_message(str(n.index), message)
+        if message_type == 'loser_to_neighs' and self.status is not 'loser':
+            winner_to_neighs_message = {
+                'author': str(self.index),
+                'type': 'winner_to_neighs',
+                'content': str(self.priority)
+            }
+            message = json.dumps(winner_to_neighs_message)
+            for n in self.neighbors:
+                self.send_message(str(n.index), message)
+            print("{} {} EWENEMENT SINGING! la la la ...".format(self.index, self.priority))
+            time.sleep(2)
+            print("{} {} BECOMING INACTIVE".format(self.index, self.priority))
+            # SEND TO NEIGHBORS THAT THEY NOW CAN REROLL
+            refresh_losers = {
+                'author': str(self.index),
+                'type': 'refresh_losers',
+                'content': str(self.priority)
+            }
+            message = json.dumps(refresh_losers)
+            for n in self.neighbors:
+                self.send_message(str(n.index), message)
+            ch.basic_cancel(method.consumer_tag)
+            return
 
     def run(self):
-        # Main question is how to create round synchronization???
         print("[M{}] Started".format(self.index))
-        # send v to all its neighbors
         find_first_winner_message = {
             'author': str(self.index),
             'type': 'first',
