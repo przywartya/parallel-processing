@@ -40,7 +40,7 @@ class Musician:
                                    properties=properties,
                                    routing_key=addres,
                                    body=message)
-        print("[M{}] Sent to {}".format(self.index, addres))
+        # print("[M{}] Sent to {}".format(self.index, addres))
 
     def callback(self, ch, method, properties, body):
         message = json.loads(body)
@@ -51,7 +51,7 @@ class Musician:
         if message_type == 'first' and self.status != 'loser':
             if int(message_content) not in self.first_messages:
                 self.first_messages.append(int(message_content))
-            print("[{}]A {} {}".format(self.priority, self.first_messages, len(self.neighbors)))
+            # print("[{}]A {} {}".format(self.priority, self.first_messages, len(self.neighbors)))
             if len(self.first_messages) == len(self.neighbors):
                 if all([self.priority > neigh_v for neigh_v in self.first_messages]):
                     print("{} WINNER with value {}".format(self.index, self.priority))
@@ -63,8 +63,9 @@ class Musician:
                     message = json.dumps(winner_to_neighs_message)
                     for n in self.neighbors:
                         self.send_message(str(n.index), message)
+                    print("{} {} SINGING! la la la ...".format(self.index, self.priority))
                     time.sleep(2)
-                    print("{} BECOMING INACTIVE".format(self.priority))
+                    print("{} {} BECOMING INACTIVE".format(self.index, self.priority))
                     # SEND TO NEIGHBORS THAT THEY NOW CAN REROLL
                     refresh_losers = {
                         'author': str(self.index),
@@ -80,11 +81,12 @@ class Musician:
         if message_type == 'refresh_losers' and self.status == 'loser':
             self.how_many_winners -= 1
             self.neighbors = [n for n in self.neighbors if n.index != int(message_author)]
-            print("[{}] Refresh losers acquired. How many winers? {}".format(self.priority, self.how_many_winners))
-            print("[{}] Neighbors {}".format(self.priority, self.first_messages))
+            # print("[{}] Refresh losers acquired. How many winers? {}".format(self.priority, self.how_many_winners))
+            # print("[{}] Neighbors {}".format(self.priority, self.first_messages))
             if not self.neighbors:
+                print("{} {} SINGING! la la la ...".format(self.index, self.priority))
                 time.sleep(2)
-                print("{} BECOMING INACTIVE".format(self.priority))
+                print("{} {} BECOMING INACTIVE".format(self.index, self.priority))
                 ch.basic_cancel(method.consumer_tag)
                 return
             if self.how_many_winners == 0:
@@ -104,8 +106,7 @@ class Musician:
             winner_index = int(message_content)
             if winner_index in self.first_messages:
                 self.first_messages.remove(int(message_content))
-            # self.neighbors.remove(message_author)
-            print("{} LOSER: neighbors {}".format(self.priority, self.first_messages))
+            print("{} LOSER with value {}, neighbors {}".format(self.index, self.priority, self.first_messages))
             loser_to_neighs_message = {
                 'author': str(self.index),
                 'type': 'loser_to_neighs',
