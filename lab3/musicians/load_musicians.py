@@ -42,63 +42,76 @@ class Musician:
                                    body=message)
         # print("[M{}] Sent to {}".format(self.index, addres))
 
+    def try_to_sing(self):
+        if all([self.priority > neigh_v for neigh_v in self.first_messages]):
+            print("{} WINNER with value {}".format(self.index, self.priority))
+            message = json.dumps({
+                'author': str(self.index),
+                'type': 'winner_to_neighs',
+                'content': str(self.priority)
+            })
+            for n in self.neighbors:
+                self.send_message(str(n.index), message)
+            self.start_singing()
+            # SEND TO NEIGHBORS THAT THEY NOW CAN REROLL
+            message = json.dumps({
+                'author': str(self.index),
+                'type': 'refresh_losers',
+                'content': str(self.priority)
+            })
+            for n in self.neighbors:
+                self.send_message(str(n.index), message)
+            return True
+        else:
+            return False
+
+    def start_singing(self):
+        print("[{}] [{}] SINGING! la la la ...".format(self.index, self.priority))
+        time.sleep(2)
+        print("[{}] [{}] BECOMING INACTIVE".format(self.index, self.priority))
+
     def callback(self, ch, method, properties, body):
         message = json.loads(body)
         message_author = message['author']
         message_type = message['type']
         message_content = message['content']
         # print("[M{}] {}:{}, messages {}".format(self.index, method.routing_key, message_content, self.messages))
+        
         if message_type == 'first' and self.status != 'loser':
             if int(message_content) not in self.first_messages:
                 self.first_messages.append(int(message_content))
             # print("[{}]A {} {}".format(self.priority, self.first_messages, len(self.neighbors)))
+            print("{} Wchodzi tu 0!".format(self.priority))
             if len(self.first_messages) == len(self.neighbors):
-                if all([self.priority > neigh_v for neigh_v in self.first_messages]):
-                    print("{} WINNER with value {}".format(self.index, self.priority))
-                    winner_to_neighs_message = {
-                        'author': str(self.index),
-                        'type': 'winner_to_neighs',
-                        'content': str(self.priority)
-                    }
-                    message = json.dumps(winner_to_neighs_message)
-                    for n in self.neighbors:
-                        self.send_message(str(n.index), message)
-                    print("{} {} SINGING! la la la ...".format(self.index, self.priority))
-                    time.sleep(2)
-                    print("{} {} BECOMING INACTIVE".format(self.index, self.priority))
-                    # SEND TO NEIGHBORS THAT THEY NOW CAN REROLL
-                    refresh_losers = {
-                        'author': str(self.index),
-                        'type': 'refresh_losers',
-                        'content': str(self.priority)
-                    }
-                    message = json.dumps(refresh_losers)
-                    for n in self.neighbors:
-                        self.send_message(str(n.index), message)
+                print("{} Wchodzi tu 1 {}".format(self.priority, all([self.priority > neigh_v for neigh_v in self.first_messages])))
+                if self.try_to_sing():
                     ch.basic_cancel(method.consumer_tag)
-                    return
         
         if message_type == 'refresh_losers' and self.status == 'loser':
             self.how_many_winners -= 1
             self.neighbors = [n for n in self.neighbors if n.index != int(message_author)]
-            # print("[{}] Refresh losers acquired. How many winers? {}".format(self.priority, self.how_many_winners))
-            # print("[{}] Neighbors {}".format(self.priority, self.first_messages))
+            print("[{}] Refresh losers acquired. How many winers? {}".format(self.priority, self.how_many_winners))
+            print("[{}] Neighbors {}".format(self.priority, self.first_messages))
             if not self.neighbors:
-                print("{} {} SINGING! la la la ...".format(self.index, self.priority))
-                time.sleep(2)
-                print("{} {} BECOMING INACTIVE".format(self.index, self.priority))
+                self.start_singing()
                 ch.basic_cancel(method.consumer_tag)
                 return
             if self.how_many_winners == 0:
                 self.status = None
-                find_first_winner_message = {
-                    'author': str(self.index),
-                    'type': 'first',
-                    'content': str(self.priority)
-                }
-                message = json.dumps(find_first_winner_message)
-                for n in self.neighbors:
-                    self.send_message(str(n.index), message)
+                if self.try_to_sing():
+                    ch.basic_cancel(method.consumer_tag)
+                    return
+                else:
+                    find_first_winner_message = {
+                        'author': str(self.index),
+                        'type': 'first',
+                        'content': str(self.priority)
+                    }
+                    message = json.dumps(find_first_winner_message)
+                    for n in self.neighbors:
+                        self.send_message(str(n.index), message)
+                # WYDAJE MI SIE ZE MOGE TO SPRAWDZIC MAXA ZE SWOICH
+                # NEIGHBOROW, JESLI SPOKO TO POSPIEWAC I DOPIERO WTEDY IM WYSLAC ELO
 
         if message_type == 'winner_to_neighs':
             self.how_many_winners += 1
@@ -107,51 +120,44 @@ class Musician:
             if winner_index in self.first_messages:
                 self.first_messages.remove(int(message_content))
             print("{} LOSER with value {}, neighbors {}".format(self.index, self.priority, self.first_messages))
-            loser_to_neighs_message = {
+            message = json.dumps({
                 'author': str(self.index),
                 'type': 'loser_to_neighs',
                 'content': str(self.priority)
-            }
-            message = json.dumps(loser_to_neighs_message)
+            })
+            # Moze zamiast wysylac do wszystkich to tylko do tego z maxem?
             for n in self.neighbors:
                 self.send_message(str(n.index), message)
-            # SEND TO ALL NEIGHBORS BUT THE WINNER
-            # THAT YOU ARE A LOSER 
-            # AND THEY SHOULD REROLL THE WINNER BETWEEN THEMSELVES
-            # (IF THEY ARE NOT LOSERS)
+            
 
-        if message_type == 'loser_to_neighs' and self.status is not 'loser':
-            winner_to_neighs_message = {
-                'author': str(self.index),
-                'type': 'winner_to_neighs',
-                'content': str(self.priority)
-            }
-            message = json.dumps(winner_to_neighs_message)
-            for n in self.neighbors:
-                self.send_message(str(n.index), message)
-            print("{} {} EWENEMENT SINGING! la la la ...".format(self.index, self.priority))
-            time.sleep(2)
-            print("{} {} BECOMING INACTIVE".format(self.index, self.priority))
-            # SEND TO NEIGHBORS THAT THEY NOW CAN REROLL
-            refresh_losers = {
-                'author': str(self.index),
-                'type': 'refresh_losers',
-                'content': str(self.priority)
-            }
-            message = json.dumps(refresh_losers)
-            for n in self.neighbors:
-                self.send_message(str(n.index), message)
-            ch.basic_cancel(method.consumer_tag)
-            return
+        if message_type == 'loser_to_neighs' and self.status != 'loser':
+            if all([self.priority > neigh_v for neigh_v in self.first_messages]):
+                message = json.dumps({
+                    'author': str(self.index),
+                    'type': 'winner_to_neighs',
+                    'content': str(self.priority)
+                })
+                for n in self.neighbors:
+                    self.send_message(str(n.index), message)
+                self.start_singing()
+                # SEND TO NEIGHBORS THAT THEY NOW CAN REROLL
+                message = json.dumps({
+                    'author': str(self.index),
+                    'type': 'refresh_losers',
+                    'content': str(self.priority)
+                })
+                for n in self.neighbors:
+                    self.send_message(str(n.index), message)
+                ch.basic_cancel(method.consumer_tag)
+                return
 
     def run(self):
         print("[M{}] Started".format(self.index))
-        find_first_winner_message = {
+        message = json.dumps({
             'author': str(self.index),
             'type': 'first',
             'content': str(self.priority)
-        }
-        message = json.dumps(find_first_winner_message)
+        })
         for n in self.neighbors:
             self.send_message(str(n.index), message)
         queue_name = self.result.method.queue
@@ -169,18 +175,11 @@ class Musician:
             self.index, self.position, self.priority)
 
 class Neighbor:
-    priorities = ['unknown', 'winner', 'not_winner']
-    exchanges = ['unknown', 'rejected', 'accepted']
-
     def __init__(self, index, position):
         self.index = index
         self.position = position
-        self.priority = ['unknown']
-        self.exchange = ['unknown']
     
     def __str__(self):
-        robust = "Neighbor: {} priority: {} exchange: {}".format(
-            self.position, self.priority[0], self.exchange[0])
         simple = "Neighbor: {}".format(self.index)
         return simple
 
