@@ -24,7 +24,9 @@ class Musician:
                                 queue=self.result.method.queue,
                                 routing_key=str(self.index))
         self.first_messages = []
+        self.neighbors_weights_wihout_losers = []
         self.status = None
+        self.did_gather_initial_info = False
         self.how_many_winners = 0
         
     def establish_connection(self):
@@ -40,7 +42,6 @@ class Musician:
                                    properties=properties,
                                    routing_key=addres,
                                    body=message)
-        # print("[M{}] Sent to {}".format(self.index, addres))
 
     def try_to_sing(self):
         if all([self.priority > neigh_v for neigh_v in self.first_messages]):
@@ -75,23 +76,23 @@ class Musician:
         message_author = message['author']
         message_type = message['type']
         message_content = message['content']
-        # print("[M{}] {}:{}, messages {}".format(self.index, method.routing_key, message_content, self.messages))
         
         if message_type == 'first' and self.status != 'loser':
             if int(message_content) not in self.first_messages:
                 self.first_messages.append(int(message_content))
             # print("[{}]A {} {}".format(self.priority, self.first_messages, len(self.neighbors)))
-            print("{} Wchodzi tu 0!".format(self.priority))
+            # print("{} Wchodzi tu 0!".format(self.priority))
             if len(self.first_messages) == len(self.neighbors):
-                print("{} Wchodzi tu 1 {}".format(self.priority, all([self.priority > neigh_v for neigh_v in self.first_messages])))
+                self.did_gather_initial_info = True
+                # print("{} Wchodzi tu 1 {}".format(self.priority, all([self.priority > neigh_v for neigh_v in self.first_messages])))
                 if self.try_to_sing():
                     ch.basic_cancel(method.consumer_tag)
         
         if message_type == 'refresh_losers' and self.status == 'loser':
             self.how_many_winners -= 1
             self.neighbors = [n for n in self.neighbors if n.index != int(message_author)]
-            print("[{}] Refresh losers acquired. How many winers? {}".format(self.priority, self.how_many_winners))
-            print("[{}] Neighbors {}".format(self.priority, self.first_messages))
+            # print("[{}] Refresh losers acquired. How many winers? {}".format(self.priority, self.how_many_winners))
+            # print("[{}] Neighbors {}".format(self.priority, self.first_messages))
             if not self.neighbors:
                 self.start_singing()
                 ch.basic_cancel(method.consumer_tag)
@@ -110,8 +111,6 @@ class Musician:
                     message = json.dumps(find_first_winner_message)
                     for n in self.neighbors:
                         self.send_message(str(n.index), message)
-                # WYDAJE MI SIE ZE MOGE TO SPRAWDZIC MAXA ZE SWOICH
-                # NEIGHBOROW, JESLI SPOKO TO POSPIEWAC I DOPIERO WTEDY IM WYSLAC ELO
 
         if message_type == 'winner_to_neighs':
             self.how_many_winners += 1
@@ -125,13 +124,12 @@ class Musician:
                 'type': 'loser_to_neighs',
                 'content': str(self.priority)
             })
-            # Moze zamiast wysylac do wszystkich to tylko do tego z maxem?
             for n in self.neighbors:
                 self.send_message(str(n.index), message)
-            
 
-        if message_type == 'loser_to_neighs' and self.status != 'loser':
-            if all([self.priority > neigh_v for neigh_v in self.first_messages]):
+        if message_type == 'loser_to_neighs' and self.status != 'loser' and self.did_gather_initial_info:
+            self.neighbors_weights_wihout_losers = [n for n in self.first_messages if n != int(message_content)]
+            if not self.neighbors_weights_wihout_losers or all([self.priority > neigh_v for neigh_v in self.neighbors_weights_wihout_losers]):
                 message = json.dumps({
                     'author': str(self.index),
                     'type': 'winner_to_neighs',
@@ -140,7 +138,6 @@ class Musician:
                 for n in self.neighbors:
                     self.send_message(str(n.index), message)
                 self.start_singing()
-                # SEND TO NEIGHBORS THAT THEY NOW CAN REROLL
                 message = json.dumps({
                     'author': str(self.index),
                     'type': 'refresh_losers',
@@ -152,7 +149,7 @@ class Musician:
                 return
 
     def run(self):
-        print("[M{}] Started".format(self.index))
+        print("[M {}:{}] Started".format(self.index, self.priority))
         message = json.dumps({
             'author': str(self.index),
             'type': 'first',
@@ -189,9 +186,7 @@ class Position:
         self.y = y
     
     def distance(self, other_position):
-        dist = math.sqrt((math.pow(math.fabs(self.x - other_position.x), 2)) + math.pow(math.fabs(self.y - other_position.y), 2))
-        # print("Distance to {} is {}".format(other_position, dist))
-        return dist
+        return math.sqrt((math.pow(math.fabs(self.x - other_position.x), 2)) + math.pow(math.fabs(self.y - other_position.y), 2))
 
     def __str__(self):
         return "({}, {})".format(self.x, self.y)
