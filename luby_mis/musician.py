@@ -31,13 +31,13 @@ class Musician:
     def run(self):
         print("[Musician {}:{}] Started".format(self.index, self.priority))
         # SEND INITIALIZATION MESSAGE TO ALL NEIGHBORS
-        self.broadcast_message_to_selected_neighbors('initialization', self.neighbors)
+        self.broadcast_message_to_neighbors('initialization')
         # START LISTENING ON OWN CHANNEL
         self.channel.basic_consume(self.callback, queue=self.channel_name, no_ack=True)
         self.channel.start_consuming()
 
-    def broadcast_message_to_selected_neighbors(self, message_type, selected_neighbors):
-        for neighbor in selected_neighbors:
+    def broadcast_message_to_neighbors(self, message_type):
+        for neighbor in self.neighbors:
             self.send_message(neighbor, message_type)
 
     def send_message(self, address, message_type):
@@ -70,7 +70,7 @@ class Musician:
             self.status = 'loser'
             self.number_of_winners_in_neighborhood += 1
             print("[{}] [{}] LOSER, neighbors {}".format(self.index, self.priority, self.neighbors))
-            self.broadcast_message_to_selected_neighbors('loser_established', self.neighbors)
+            self.broadcast_message_to_neighbors('loser_established')
         
         if message_type == 'winner_finished_singing' and self.status == 'loser':
             # I DECREASE AMOUNT OF WINNERS IN NEIGHBORHOOD, BUT
@@ -95,6 +95,7 @@ class Musician:
         if message_type == 'loser_established' and self.status != 'loser' and self.finished_initialization:
             # IF I AM NOT A LOSER AND I GOT A MESSAGE FROM A LOSER
             # THEN I TRY TO SING WITHOUT TAKING INTO ACCOUNT THE LOSER(S)
+            # FROM MY NEIGHBORHOOD
             print("[{}] [{}], neighbors {} -> got message from loser [{}]".format(
                 self.index, self.priority, self.neighbors, neighbor_id
             ))
@@ -112,9 +113,9 @@ class Musician:
         if all([self.priority > neigh_priority for neigh_priority in relevant_neighborhood]):
             print("[{}] [{}] WINNER, neighbors {}".format(self.index, self.priority, self.neighbors))
             # BROADCAST TO ALL NEIGHBORS THAT THEY ARE LOSERS
-            self.broadcast_message_to_selected_neighbors('winner_established', self.neighbors)
+            self.broadcast_message_to_neighbors('winner_established')
             self.start_singing()
-            self.broadcast_message_to_selected_neighbors('winner_finished_singing', self.neighbors)
+            self.broadcast_message_to_neighbors('winner_finished_singing')
             return True
         else:
             return False
