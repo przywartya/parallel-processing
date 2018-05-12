@@ -14,7 +14,7 @@ class Musician:
         self.finished_initialization = False
         self.initial_neighborhood_priorities = []
         self.number_of_winners_in_neighborhood = 0
-        self.neighborhood_priorities_without_losers = []
+        self.losers_neighborhood_priorities = []
 
     def establish_connection(self):
         # RABBIT_MQ SPECIFIC CONFIGURATION
@@ -63,18 +63,13 @@ class Musician:
                 self.finished_initialization = True
                 if self.status != 'loser':
                     if self.try_to_sing(self.initial_neighborhood_priorities):
-                        # IF FINISHED SINGING SUCCESFULLY THEN CLOSE 
-                        # THE CHANNEL AND FINISH LISTENING FOR NEW MESSAGES
                         ch.basic_cancel(method.consumer_tag)
         
         if message_type == 'winner_established':
+            # I INCREASE AMOUNT OF WINNERS IN NEIGHBORHOOD AND SET MYSELF TO LOSER
             self.status = 'loser'
             self.number_of_winners_in_neighborhood += 1
-            # I REMOVE WINNER PRIORITY FROM INITIALLY GATHERED PRIORITIES
-            # BUT I DO NOT YET UNDERSTAND WHY I DONT REMOVE HIM FROM NEIGHBORHOOD
-            if neighbor_priority in self.initial_neighborhood_priorities:
-                self.initial_neighborhood_priorities.remove(neighbor_priority)
-            print("{} LOSER with value {}, neighbors {}".format(self.index, self.priority, self.initial_neighborhood_priorities))
+            print("[{}] [{}] LOSER, neighbors {}".format(self.index, self.priority, self.neighbors))
             self.broadcast_message_to_selected_neighbors('loser_established', self.neighbors)
         
         if message_type == 'winner_finished_singing' and self.status == 'loser':
@@ -83,6 +78,8 @@ class Musician:
             self.number_of_winners_in_neighborhood -= 1
             # REMOVE WINNER WHO STOPPED SINGING FROM MY NEIGHBORHOOD
             self.neighbors.remove(neighbor_id)
+            self.initial_neighborhood_priorities.remove(neighbor_priority)
+            print("[{}] [{}] winner finished singing, neighbors {}".format(self.index, self.priority, self.neighbors))
             # IF I DONT HAVE ANY NEIGHBORS THEN I CAN SING
             if not self.neighbors:
                 self.start_singing()
@@ -94,27 +91,26 @@ class Musician:
                 if self.try_to_sing(self.initial_neighborhood_priorities):
                     ch.basic_cancel(method.consumer_tag)
                     return
-                # THERE WAS SOME SENDING INITIAL MESSAGES HERE BUT I DONT KNOW WHY
         
         if message_type == 'loser_established' and self.status != 'loser' and self.finished_initialization:
             # IF I AM NOT A LOSER AND I GOT A MESSAGE FROM A LOSER
             # THEN I TRY TO SING WITHOUT TAKING INTO ACCOUNT THE LOSER(S)
-            self.neighborhood_priorities_without_losers = [
-                n for n in self.initial_neighborhood_priorities
-                if n != neighbor_priority
+            print("[{}] [{}], neighbors {} -> got message from loser [{}]".format(
+                self.index, self.priority, self.neighbors, neighbor_id
+            ))
+            self.losers_neighborhood_priorities.append(neighbor_priority)
+            relevant_neighborhood = [
+                n for n in self.initial_neighborhood_priorities 
+                if n not in self.losers_neighborhood_priorities
             ]
-            if not self.neighborhood_priorities_without_losers:
-                self.start_singing()
-                ch.basic_cancel(method.consumer_tag)
-                return
-            elif self.try_to_sing(self.neighborhood_priorities_without_losers):
+            if self.try_to_sing(relevant_neighborhood):
                 ch.basic_cancel(method.consumer_tag)
                 return
 
     def try_to_sing(self, relevant_neighborhood):
         # IF MY PRIORITY IS BIGGER THAN ANY OF MY INITIAL NEIGHBORS
-        if all([self.priority > neighbor_priority for neighbor_priority in relevant_neighborhood]):
-            print("{} WINNER with value {}".format(self.index, self.priority))
+        if all([self.priority > neigh_priority for neigh_priority in relevant_neighborhood]):
+            print("[{}] [{}] WINNER, neighbors {}".format(self.index, self.priority, self.neighbors))
             # BROADCAST TO ALL NEIGHBORS THAT THEY ARE LOSERS
             self.broadcast_message_to_selected_neighbors('winner_established', self.neighbors)
             self.start_singing()
