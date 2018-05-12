@@ -1,1 +1,1 @@
-from lab3.musicians import load_musicians
+from luby_mis import city_square
